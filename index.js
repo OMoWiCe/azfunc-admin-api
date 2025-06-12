@@ -1,5 +1,11 @@
-const { app } = require('@azure/functions');
+// Importing Individual Functions handlers
+const { app } = require("@azure/functions");
+const getLocations = require("./src/functions/getLocations");
 
-app.setup({
-    enableHttpStream: true,
+// Getting details of all the locations
+app.http("getLocations", {
+  route: "v1/locations",
+  methods: ["GET"],
+  authLevel: "anonymous",
+  handler: getLocations,
 });

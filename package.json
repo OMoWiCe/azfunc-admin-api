@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "Admin API for OMoWiCe System Config",
   "dependencies": {
-    "@azure/functions": "^4.0.0"
+    "@azure/functions": "^4.0.0",
+    "dotenv": "^16.5.0",
+    "mssql": "^11.0.1"
   },
   "devDependencies": {},
   "main": "index.js"
