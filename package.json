@@ -1,0 +1,10 @@
+{
+  "name": "azfunc-admin-api",
+  "version": "1.0.0",
+  "description": "Admin API for OMoWiCe System Config",
+  "dependencies": {
+    "@azure/functions": "^4.0.0"
+  },
+  "devDependencies": {},
+  "main": "index.js"
+}
