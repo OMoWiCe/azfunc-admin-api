@@ -1,8 +1,8 @@
+// src/functions/getLocations.js
 const { getPool } = require("../sqlClient");
 
-module.exports = async function (context, req) {
+module.exports = async function getLocations(request, context) {
   try {
-    // Getting details of all the locations with their parameters
     const pool = await getPool();
     const result = await pool.request().query(`
       SELECT 
@@ -28,17 +28,17 @@ module.exports = async function (context, req) {
       jsonBody: result.recordset,
     };
   } catch (err) {
-    console.error("[OMOWICE-API] DB error:", err);
-    // Handle Timeout error specifically
+    context.log.error("[OMOWICE-API] DB error in getLocations:", err);
+
     if (err.code === "ETIMEOUT") {
       return {
         status: 500,
         jsonBody: {
-          error: "Database connection timeout. Try again in few seconds!",
+          error: "Database connection timeout. Try again in a few seconds!",
         },
       };
     }
-    // Handle other errors
+
     return {
       status: 500,
       jsonBody: { error: "Internal server error" },

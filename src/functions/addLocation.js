@@ -1,44 +1,40 @@
+// src/functions/addLocation.js
 const { getPool } = require("../sqlClient");
 
-module.exports = async function (context, req) {
+module.exports = async function addLocation(request, context) {
   try {
-    // Check if required fields are provided in the request body
-    const location = req.body;
-    console.log("Location data received:", location);
+    // Parse incoming JSON body
+    const location = await request.json();
+    context.log("Location data received:", location);
 
+    const p = location.parameters || {};
     if (
-      !location ||
       !location.id ||
       !location.name ||
       !location.address ||
       !location.googleMapsUrl ||
       !location.openingHours ||
-      !location.parameters ||
-      !location.parameters.avgDevicesPerPerson ||
-      !location.parameters.avgSimsPerPerson ||
-      !location.parameters.wifiUsageRatio ||
-      !location.parameters.cellularUsageRatio ||
-      !location.parameters.updateInterval
+      p.avgDevicesPerPerson == null ||
+      p.avgSimsPerPerson == null ||
+      p.wifiUsageRatio == null ||
+      p.cellularUsageRatio == null ||
+      p.updateInterval == null
     ) {
       return {
         status: 400,
         jsonBody: {
           error:
-            "Missing required fields. Please provide id, name, address, googleMapsUrl, openingHours, and parameters (avgDevicesPerPerson, avgSimsPerPerson, wifiUsageRatio, cellularUsageRatio, updateInterval)",
+            "Missing required fields: id, name, address, googleMapsUrl, openingHours, parameters(avgDevicesPerPerson, avgSimsPerPerson, wifiUsageRatio, cellularUsageRatio, updateInterval)",
         },
       };
     }
 
-    // Connect to the database
     const pool = await getPool();
-
-    // Start a transaction to ensure both tables are updated consistently
-    const transaction = pool.transaction();
-    await transaction.begin();
+    const trx = pool.transaction();
+    await trx.begin();
 
     try {
-      // Insert into LOCATIONS table
-      await transaction
+      await trx
         .request()
         .input("id", location.id)
         .input("name", location.name)
@@ -49,69 +45,53 @@ module.exports = async function (context, req) {
           VALUES (@id, @name, @address, @googleMapsUrl, @openingHours)
         `);
 
-      // Insert into LOCATION_PARAMETERS table
-      await transaction
+      await trx
         .request()
         .input("locationId", location.id)
-        .input("avgDevicesPerPerson", location.parameters.avgDevicesPerPerson)
-        .input("avgSimsPerPerson", location.parameters.avgSimsPerPerson)
-        .input("wifiUsageRatio", location.parameters.wifiUsageRatio)
-        .input("cellularUsageRatio", location.parameters.cellularUsageRatio)
-        .input("updateInterval", location.parameters.updateInterval).query(`
-          INSERT INTO LOCATION_PARAMETERS 
+        .input("avgDevicesPerPerson", p.avgDevicesPerPerson)
+        .input("avgSimsPerPerson", p.avgSimsPerPerson)
+        .input("wifiUsageRatio", p.wifiUsageRatio)
+        .input("cellularUsageRatio", p.cellularUsageRatio)
+        .input("updateInterval", p.updateInterval).query(`
+          INSERT INTO LOCATION_PARAMETERS
             (location_id, avg_devices_per_person, avg_sims_per_person, wifi_usage_ratio, cellular_usage_ratio, update_interval)
-          VALUES 
+          VALUES
             (@locationId, @avgDevicesPerPerson, @avgSimsPerPerson, @wifiUsageRatio, @cellularUsageRatio, @updateInterval)
         `);
 
-      // Commit the transaction
-      await transaction.commit();
+      await trx.commit();
 
       return {
-        status: 201, // Created
+        status: 201,
         jsonBody: {
           message: "Location added successfully",
           locationId: location.id,
         },
       };
     } catch (err) {
-      // Rollback the transaction if any error occurs
-      await transaction.rollback();
-      throw err; // Re-throw to be caught by the outer catch block
+      await trx.rollback();
+      throw err;
     }
   } catch (err) {
-    console.error("[OMOWICE-API] DB error:", err);
-
-    // Handle duplicate key error
+    context.log.error("[OMOWICE-API] Error:", err);
     if (err.number === 2627 || err.number === 2601) {
       return {
-        status: 409, // Conflict
+        status: 409,
         jsonBody: { error: "Location with this ID already exists" },
       };
     }
-
-    // Handle foreign key error
     if (err.number === 547) {
       return {
         status: 400,
         jsonBody: { error: "Invalid reference in the data provided" },
       };
     }
-
-    // Handle Timeout error specifically
     if (err.code === "ETIMEOUT") {
       return {
         status: 500,
-        jsonBody: {
-          error: "Database connection timeout. Try again in few seconds!",
-        },
+        jsonBody: { error: "Database connection timeout. Try again later." },
       };
     }
-
-    // Handle other errors
-    return {
-      status: 500,
-      jsonBody: { error: "Internal server error" },
-    };
+    return { status: 500, jsonBody: { error: "Internal server error" } };
   }
 };

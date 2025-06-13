@@ -1,111 +1,113 @@
+// src/functions/updateLocation.js
 const { getPool } = require("../sqlClient");
 
-module.exports = async function (context, req) {
+module.exports = async function updateLocation(request, context) {
   try {
-    // Check if the required locationId is provided in the route parameters
-    const locationId = context.params.locationId;
-    console.log("Location ID received:", locationId);
+    const locationId = request.params.locationId;
+    context.log("Location ID received:", locationId);
     if (!locationId) {
       return {
         status: 400,
-        jsonBody: { error: "Location ID is required in the URL parameter" }
+        jsonBody: { error: "Location ID is required in the URL parameter" },
       };
     }
 
-    // Get the update data from the request body
-    const updateData = context.params.body;
-    console.log("Update data received:", updateData);
+    const updateData = await request.json();
+    context.log("Update data received:", updateData);
     if (!updateData) {
       return {
         status: 400,
-        jsonBody: { error: "Request body is empty" }
+        jsonBody: { error: "Request body is empty" },
       };
     }
 
-    // Connect to the database
     const pool = await getPool();
 
-    // First check if the location exists
-    const checkResult = await pool.request()
-      .input('id', locationId)
-      .query('SELECT COUNT(1) AS count FROM LOCATIONS WHERE id = @id');
+    const checkResult = await pool
+      .request()
+      .input("id", locationId)
+      .query("SELECT COUNT(1) AS count FROM LOCATIONS WHERE id = @id");
 
     if (checkResult.recordset[0].count === 0) {
-      return {
-        status: 404,
-        jsonBody: { error: "Location not found" }
-      };
+      return { status: 404, jsonBody: { error: "Location not found" } };
     }
 
-    // Start a transaction
-    const transaction = pool.transaction();
-    await transaction.begin();
+    const trx = pool.transaction();
+    await trx.begin();
 
-    try {      // Validate required fields for location update
-      if (!updateData.name || !updateData.address || !updateData.googleMapsUrl || !updateData.openingHours) {
+    try {
+      const d = updateData;
+      if (!d.name || !d.address || !d.googleMapsUrl || !d.openingHours) {
         return {
           status: 400,
-          jsonBody: { error: "Required location fields are missing (name, address, googleMapsUrl, openingHours)" }
+          jsonBody: {
+            error:
+              "Required location fields are missing (name, address, googleMapsUrl, openingHours)",
+          },
         };
       }
 
-      // Update LOCATIONS table with all fields
-      await transaction.request()
-        .input('id', locationId)
-        .input('name', updateData.name)
-        .input('address', updateData.address)
-        .input('googleMapsUrl', updateData.googleMapsUrl)
-        .input('openingHours', updateData.openingHours)
-        .query(`
-          UPDATE LOCATIONS SET 
+      await trx
+        .request()
+        .input("id", locationId)
+        .input("name", d.name)
+        .input("address", d.address)
+        .input("googleMapsUrl", d.googleMapsUrl)
+        .input("openingHours", d.openingHours).query(`
+          UPDATE LOCATIONS SET
             name = @name,
             address = @address,
             google_maps_url = @googleMapsUrl,
             opening_hours = @openingHours
           WHERE id = @id
         `);
-          // Make sure location parameters are provided
-      if (!updateData.parameters) {
+
+      const p = d.parameters;
+      if (!p) {
         return {
           status: 400,
-          jsonBody: { error: "Location parameters are required" }
+          jsonBody: { error: "Location parameters are required" },
         };
       }
-      
-      const params = updateData.parameters;
-      
-      // Validate required fields for parameters
-      if (params.avgDevicesPerPerson === undefined || 
-          params.avgSimsPerPerson === undefined || 
-          params.wifiUsageRatio === undefined || 
-          params.cellularUsageRatio === undefined || 
-          params.updateInterval === undefined) {
+
+      const missing = [
+        p.avgDevicesPerPerson,
+        p.avgSimsPerPerson,
+        p.wifiUsageRatio,
+        p.cellularUsageRatio,
+        p.updateInterval,
+      ].some((v) => v === undefined);
+
+      if (missing) {
         return {
           status: 400,
-          jsonBody: { 
-            error: "All parameter fields are required (avgDevicesPerPerson, avgSimsPerPerson, wifiUsageRatio, cellularUsageRatio, updateInterval)" 
-          }
+          jsonBody: {
+            error:
+              "All parameter fields are required (avgDevicesPerPerson, avgSimsPerPerson, wifiUsageRatio, cellularUsageRatio, updateInterval)",
+          },
         };
       }
-      
-      // Check if the parameters record exists first
-      const paramCheckResult = await transaction.request()
-        .input('locationId', locationId)
-        .query('SELECT COUNT(1) AS count FROM LOCATION_PARAMETERS WHERE location_id = @locationId');
-      
-      const paramExists = paramCheckResult.recordset[0].count > 0;
-      
+
+      const paramExists =
+        (
+          await trx
+            .request()
+            .input("locationId", locationId)
+            .query(
+              "SELECT COUNT(1) AS count FROM LOCATION_PARAMETERS WHERE location_id = @locationId"
+            )
+        ).recordset[0].count > 0;
+
       if (paramExists) {
-        // Update existing parameters with all fields
-        await transaction.request()
-          .input('locationId', locationId)
-          .input('avgDevicesPerPerson', params.avgDevicesPerPerson)
-          .input('avgSimsPerPerson', params.avgSimsPerPerson)
-          .input('wifiUsageRatio', params.wifiUsageRatio)
-          .input('cellularUsageRatio', params.cellularUsageRatio)
-          .input('updateInterval', params.updateInterval)
-          .query(`
-            UPDATE LOCATION_PARAMETERS SET 
+        await trx
+          .request()
+          .input("locationId", locationId)
+          .input("avgDevicesPerPerson", p.avgDevicesPerPerson)
+          .input("avgSimsPerPerson", p.avgSimsPerPerson)
+          .input("wifiUsageRatio", p.wifiUsageRatio)
+          .input("cellularUsageRatio", p.cellularUsageRatio)
+          .input("updateInterval", p.updateInterval).query(`
+            UPDATE LOCATION_PARAMETERS SET
               avg_devices_per_person = @avgDevicesPerPerson,
               avg_sims_per_person = @avgSimsPerPerson,
               wifi_usage_ratio = @wifiUsageRatio,
@@ -115,59 +117,48 @@ module.exports = async function (context, req) {
             WHERE location_id = @locationId
           `);
       } else {
-        // Insert new parameter record with all required fields
-        await transaction.request()
-          .input('locationId', locationId)
-          .input('avgDevicesPerPerson', params.avgDevicesPerPerson)
-          .input('avgSimsPerPerson', params.avgSimsPerPerson)
-          .input('wifiUsageRatio', params.wifiUsageRatio)
-          .input('cellularUsageRatio', params.cellularUsageRatio)
-          .input('updateInterval', params.updateInterval)
-          .query(`
-            INSERT INTO LOCATION_PARAMETERS 
+        await trx
+          .request()
+          .input("locationId", locationId)
+          .input("avgDevicesPerPerson", p.avgDevicesPerPerson)
+          .input("avgSimsPerPerson", p.avgSimsPerPerson)
+          .input("wifiUsageRatio", p.wifiUsageRatio)
+          .input("cellularUsageRatio", p.cellularUsageRatio)
+          .input("updateInterval", p.updateInterval).query(`
+            INSERT INTO LOCATION_PARAMETERS
               (location_id, avg_devices_per_person, avg_sims_per_person, wifi_usage_ratio, cellular_usage_ratio, update_interval)
-            VALUES 
-              (@locationId, @avgDevicesPerPerson, @avgSimsPerPerson, @wifiUsageRatio, @cellularUsageRatio, @updateInterval)
+            VALUES (@locationId, @avgDevicesPerPerson, @avgSimsPerPerson, @wifiUsageRatio, @cellularUsageRatio, @updateInterval)
           `);
       }
 
-      // Commit the transaction
-      await transaction.commit();
+      await trx.commit();
 
       return {
         status: 200,
-        jsonBody: { 
+        jsonBody: {
           message: "Location updated successfully",
-          locationId: locationId 
-        }
+          locationId,
+        },
       };
-    } catch (err) {
-      // Rollback the transaction if any error occurs
-      await transaction.rollback();
-      throw err; // Re-throw to be caught by the outer catch block
+    } catch (e) {
+      await trx.rollback();
+      throw e;
     }
   } catch (err) {
-    console.error("[OMOWICE-API] DB error:", err);
-    
-    // Handle foreign key error
+    context.log.error("[OMOWICE-API] DB error in updateLocation:", err);
+
     if (err.number === 547) {
       return {
         status: 400,
-        jsonBody: { error: "Invalid reference in the data provided" }
+        jsonBody: { error: "Invalid reference in the data provided" },
       };
     }
-
-    // Handle Timeout error specifically
     if (err.code === "ETIMEOUT") {
       return {
         status: 500,
-        jsonBody: {
-          error: "Database connection timeout. Try again in few seconds!",
-        },
+        jsonBody: { error: "Database connection timeout. Try again later." },
       };
     }
-    
-    // Handle other errors
     return {
       status: 500,
       jsonBody: { error: "Internal server error" },

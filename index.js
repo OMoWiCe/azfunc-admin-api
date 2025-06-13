@@ -5,6 +5,9 @@ const addLocation = require("./src/functions/addLocation");
 const updateLocation = require("./src/functions/updateLocation");
 const deleteLocation = require("./src/functions/deleteLocation");
 
+// Enable streaming bodies (large-JSON support)
+app.setup({ enableHttpStream: true });
+
 // Getting details of all the locations
 app.http("getLocations", {
   route: "v1/locations",

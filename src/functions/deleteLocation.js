@@ -1,101 +1,96 @@
+// src/functions/deleteLocation.js
 const { getPool } = require("../sqlClient");
 
-module.exports = async function (context, req) {
+module.exports = async function deleteLocation(request, context) {
   try {
-    // Check if the required locationId is provided in the route parameters
-    const locationId = req.params.locationId;
+    const locationId = request.params.locationId;
     if (!locationId) {
       return {
         status: 400,
-        jsonBody: { error: "Location ID is required in the URL parameter" }
+        jsonBody: { error: "Location ID is required in the URL parameter" },
       };
     }
 
-    // Connect to the database
     const pool = await getPool();
 
-    // First check if the location exists
-    const checkResult = await pool.request()
-      .input('id', locationId)
-      .query('SELECT COUNT(1) AS count FROM LOCATIONS WHERE id = @id');
+    // Ensure the location exists
+    const checkResult = await pool
+      .request()
+      .input("id", locationId)
+      .query("SELECT COUNT(1) AS count FROM LOCATIONS WHERE id = @id");
 
     if (checkResult.recordset[0].count === 0) {
       return {
         status: 404,
-        jsonBody: { error: "Location not found" }
+        jsonBody: { error: "Location not found" },
       };
     }
 
-    // Start a transaction
-    const transaction = pool.transaction();
-    await transaction.begin();
+    const trx = pool.transaction();
+    await trx.begin();
 
-    try {      // Delete from ACTIVE_DEVICES table
-      await transaction.request()
-        .input('locationId', locationId)
-        .query('DELETE FROM ACTIVE_DEVICES WHERE location_id = @locationId');
+    try {
+      // Delete dependent records in one transaction
+      const t = trx.request().input("locationId", locationId);
 
-      // Delete from PENDING_DEACTIVATIONS table
-      await transaction.request()
-        .input('locationId', locationId)
-        .query('DELETE FROM PENDING_DEACTIVATIONS WHERE location_id = @locationId');
+      await t.query(
+        "DELETE FROM ACTIVE_DEVICES WHERE location_id = @locationId"
+      );
+      await t.query(
+        "DELETE FROM PENDING_DEACTIVATIONS WHERE location_id = @locationId"
+      );
+      await t.query(
+        "DELETE FROM LOCATION_PARAMETERS WHERE location_id = @locationId"
+      );
 
-      // Delete from LOCATION_PARAMETERS table
-      await transaction.request()
-        .input('locationId', locationId)
-        .query('DELETE FROM LOCATION_PARAMETERS WHERE location_id = @locationId');
-      
-      // Check if there are any related MAIN_METRICS records before proceeding
-      const metricsCheck = await transaction.request()
-        .input('locationId', locationId)
-        .query('SELECT COUNT(1) as count FROM MAIN_METRICS WHERE location_id = @locationId');
-      
-      // If metrics records exist for this location, delete them
+      const metricsCheck = await t.query(
+        "SELECT COUNT(1) AS count FROM MAIN_METRICS WHERE location_id = @locationId"
+      );
+
       if (metricsCheck.recordset[0].count > 0) {
-        await transaction.request()
-          .input('locationId', locationId)
-          .query('DELETE FROM MAIN_METRICS WHERE location_id = @locationId');
+        await t.query(
+          "DELETE FROM MAIN_METRICS WHERE location_id = @locationId"
+        );
       }
 
-      // Then delete from LOCATIONS table (parent table)
-      await transaction.request()
-        .input('id', locationId)
-        .query('DELETE FROM LOCATIONS WHERE id = @id');
+      await trx
+        .request()
+        .input("id", locationId)
+        .query("DELETE FROM LOCATIONS WHERE id = @id");
 
-      // Commit the transaction
-      await transaction.commit();
+      await trx.commit();
 
       return {
         status: 200,
-        jsonBody: { message: "Location and associated data deleted successfully" }
+        jsonBody: {
+          message: "Location and associated data deleted successfully",
+        },
       };
     } catch (err) {
-      // Rollback the transaction if any error occurs
-      await transaction.rollback();
-      throw err; // Re-throw to be caught by the outer catch block
+      await trx.rollback();
+      throw err;
     }
   } catch (err) {
-    console.error("[OMOWICE-API] DB error:", err);
-    
-    // Handle foreign key constraint errors
+    context.log.error("[OMOWICE-API] DB error on deleteLocation:", err);
+
     if (err.number === 547) {
       return {
-        status: 409, // Conflict
-        jsonBody: { error: "Cannot delete this location because it has related records. Delete those records first." }
+        status: 409,
+        jsonBody: {
+          error:
+            "Cannot delete this location due to existing related records. Please remove them first.",
+        },
       };
     }
-
-    // Handle Timeout error specifically
     if (err.code === "ETIMEOUT") {
       return {
         status: 500,
         jsonBody: {
-          error: "Database connection timeout. Try again in few seconds!",
+          error: "Database connection timeout. Please try again later.",
         },
       };
     }
-    
-    // Handle other errors
+
     return {
       status: 500,
       jsonBody: { error: "Internal server error" },
