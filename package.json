@@ -8,16 +8,5 @@
     "mssql": "^11.0.1"
   },
   "devDependencies": {},
-  "main": "index.js",
-  "engines": {
-    "node": ">=14.0.0"
-  },
-  "config": {
-    "fund": false
-  },
-  "scripts": {
-    "start": "func start",
-    "test": "echo \"No tests yet...\"",
-    "build": "echo \"No build steps required...\""
-  }
+  "main": "index.js"
 }
