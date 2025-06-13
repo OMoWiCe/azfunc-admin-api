@@ -8,10 +8,5 @@
     "mssql": "^11.0.1"
   },
   "devDependencies": {},
-  "main": "index.js",
-  "scripts": {
-    "start": "func start",
-    "test": "echo \"No tests yet...\"",
-    "build": "echo \"No build steps required...\""
-  }
+  "main": "index.js"
 }
